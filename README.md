@@ -1,151 +1,290 @@
-<h1>React com redux parte 9 - Atualizar quantidade e totais</h1>
+<h1>React com redux parte 10 - (Saga) Middwares para actions</h1>
 
-- Adicionar a nova action em `src/store/modules/cart/actions.js`
+No caso de um e-commerce, quando precisamos adicionar um item ao carrinho, é necessário buscar
+mais informações sobre o produto como peso estoque entre outras coisas, e para isso precisamos de chamada
+a api, buscar os detalhes que faltam e sim adicionar ele ao carrinho.
+
+- Instalar o `redux-saga`:
+
+```bash
+yarn add redux-saga
+```
+
+
+- Criar o arquivo `src/store/modules/cart/sagas.js`
+
+- Aqui utilizaremos o `generators` [ES6 Generators estão mudando nosso modo de escrever JavaScript](https://medium.com/nossa-coletividad/es6-generators-estão-mudando-nosso-modo-de-escrever-javascript-e99f7c79bdd7)
+
+- O `generators` é semelhante ao `async` e ao `await`, porém bem mais poderoso.
+
+- No arquivo `src/store/modules/cart/saga.js` criaremos a seguinte function:
 
 ```js
-export function updateAmount(id, amount) {
-  return { type: '@cart/UPDATE_AMOUNT', id, amount };
+function* addToCart() {
+
 }
 ```
 
-- No arquivo `src/store/modules/cart/reducer.js`
+- Quando adicionarmos um item ao carrinho, não será chamado mais imediatamente o redux, mas sim essa function, para que busque os dados necessários do produto e depois então continue o fluxo como antes.
+
+- Alterar também no arquivo `src/store/modules/cart/actions`, a function `addToCart`, não irá mais receber o produto inteiro mas sim  o id:
 
 ```js
-case '@cart/UPDATE_AMOUNT':
-  if (action.amount <= 0) {
-    return state;
+export function addToCart(id) {
+  return {
+    type: '@cart/ADD',
+    id
+  };
+}
+```
+
+- Na página `Home` também que executa o disparo dessa function alterar para enviar o id apenas ao invés de buscar o produto inteiro:
+
+```js
+handleAddProduct = id => {
+  //...
+  addToCart(id);
+}
+// ...
+<button
+  type="button"
+  onClick={() => this.handleAddProduct(product.id)}
+>
+```
+
+---
+
+<h2>Trabalhando no arquivo cart/sagas</h2>
+
+- Importar nossa api do axios:
+
+```js
+import api from '../../../services/api';
+```
+
+- Importar a lib `redux-saga/effects` obtendo a function `call`, esse metodo é responsavél por chamar metodos assíncronos que retorna `promise`, pois utilizando yeld não permite realizar isso.
+
+```js
+import { call } from 'redux-saga/effects';
+```
+
+- E agora na nossa function podemos implementar da seguinte forma:
+
+
+```js
+function* addToCart({ id }) {
+  const response = yield call(api.get,`/products/${id}`);
+}
+```
+
+- Perceba que o metodo `call`, não permite chamar diretamente a function `api.get(...)`, mas é necessário inserir os parametros de forma parametrizada.
+
+- Mais informações de como utilizar metodos posts da api axios com o `call`:
+
+- [Redux-Saga pass headers to axios.post call](https://stackoverflow.com/questions/53241315/redux-saga-pass-headers-to-axios-post-call) Ex.:
+
+```js
+function* createPostSaga(action) {
+  const token = yield select(selectToken);
+  const headerParams = {
+    "Authorization": `JWT ${token}`
+  };
+
+  const apiCall = () => {
+    return axios.post('/posts', {
+      action.payload // only if not an object. Otherwise don't use outer {},
+    },
+    headerParams: headerParams,
+   ).then(response => response.data)
+    .catch(err => {
+      throw err;
+    });
   }
-  return produce(state, draft => {
-    const productIndex = draft.findIndex(p => p.id === action.id);
 
-    if (productIndex >= 0) {
-      draft[productIndex].amount = Number(action.amount);
-    }
-  });
+  console.log(token, headerParams);
+  try {
+    yield call(apiCall);
+    yield call(getPosts());
+  } catch (error) {
+    console.log(error);
+  }
+}
 ```
 
-- Lembrando que a responsabilidade de validar os dados é do redux, nesse caso para verificar se a quantidade é menor que zero.
+- Continuando:
 
+- Como o `sagas.js` na function `addToCart` ficou ouvindo a action `@cart/ADD`, precisamos ajustar essa action e criar uma nova action.
 
-- Alterar a page `Cart` :
+- Então no arquivo `src/store/modules/cart/actions.js` vamos alterar da seguinte forma:
 
 ```js
-const mapDispatchToProps = dispatch =>
-  bindActionCreators(CartActions, dispatch);
+export function addToCartRequest(id) {
+  return {
+    type: '@cart/ADD_REQUEST',
+    id
+  };
+}
 
-export default connect(mapStateToProps, mapDispatchToProps)(Cart);
+export function addToCartSuccess(product) {
+  return {
+    type: '@cart/ADD_SUCCESS',
+    product
+  };
+}
+
+export function removeFromCart(id) {
+  return { type: '@cart/REMOVE', id };
+}
+
+export function updateAmount(id, amount) {
+  return { type: '@cart/UPDATE_AMOUNT', id, amount };
+}
+
 ```
 
-- Adicionar a nova prop:
+- A action `@cart/ADD_REQUEST` irá chamar o `saga` e o quando ela finalizar, o `saga` irá chamar a action `@cart/ADD_SUCCESS`
+
+- Alteramos também o arquivo `src/store/modules/cart/reducer.js`:
 
 ```js
-function Cart({ cart, removeFromCart, updateAmount }) {
+export default function cart(state = [], action) {
+  switch (action.type) {
+    case '@cart/ADD_SUCCESS':
+      return produce(state, draft => {
+        // console.log(draft.length);
+        // console.log(Object.keys(draft));
+
+        /* if (draft.length > 0) {
+          console.log(Object.keys(draft[0]));
+          console.log(draft[0].title);
+        } */
+
+        const productIndex = draft.findIndex(p => p.id === action.product.id);
+
+        if (productIndex >= 0) {
+          draft[productIndex].amount += 1;
+        } else {
+          draft.push({ ...action.product, amount: 1 });
+        }
+      });
+    //...
+  }
+}
+
 ```
 
-
-----
-
-<h2>Calcular Subtotal</h2>
-
-
-- Poderiamos realizar o calculo do subtotal no redux, ou criar uma function para no render para calcular, porém entramos no problema de performace então para realizar esse calculo faremos o seguinte:
-
-- Na página `Cart` adicionar o import:
+- E na página `Home` alteramos a chamada `addToCart` pois acabamos de altera-la:
 
 ```js
-import { formatPrice } from '../../util/format';
+handleAddProduct = id => {
+  const { addToCartRequest } = this.props;
+
+  addToCartRequest(id);
+};
 ```
-
-- Ajustar a function `mapStateToProps`
-
-- Não esquecer os parenteses em volta das chaves.
-
-```js
-const mapStateToProps = state => ({
-  // Não esquecer os parenteses em volta das chaves.
-  cart: state.cart.map(product => ({
-    ...product,
-    subtotal: formatPrice(product.amount * product.price)
-  }))
-});
-```
-
-- Não esquecer os parenteses em volta das chaves.
-
 
 ---
 
-<h2> O total </h2>
+<h2>Disparar um metódo dentro do saga</h2>
 
-- Ajustar o `mapStateToProps` da página `Cart`:
-
-```js
-const mapStateToProps = state => ({
-  // Não esquecer os parenteses em volta das chaves.
-  cart: state.cart.map(product => ({
-    ...product,
-    subtotal: formatPrice(product.amount * product.price)
-  })),
-  total: formatPrice(state.cart.reduce((total, product) => {
-    return total + product.price * product.amount;
-  }, 0))
-});
-```
-- Realizamos o reduce para reduzir o array para um só valor,
-nesse caso somamos a variavel total ao preço vezes a quantidade do produto, iniciando o total em zero.
-
-- Não se esquecer de adicionar a propriedade `total` na function `Cart`:
+- Importo a action `addToCartSuccess`:
 
 ```js
-function Cart({ cart, total, removeFromCart, updateAmount }) {
+import { addToCartSuccess } from './actions';
 ```
 
+- No arquivo `src/store/modules/cart/sagas.js` utilizamos o `put` ele dispara uma action para o redux:
+
+```js
+import { call, put } from 'redux-saga/effects';
+```
+
+- E no final da function `addToCart` adiciono:
+
+```js
+yield put(addToCartSuccess(response.data))
+```
+
+- Até aí ok. Mas o que e como será chamada essa nossa function do saga?
+
+- Precisamos importar mais um metodo do `redux-saga/effects` chamado `all` e o `takeLatest`:
+
+```js
+import { call, put, all, takeLatest } from 'redux-saga/effects';
+```
+
+- O `all` utilizamos para cadastrar vários listeners, para ficar ouvindo uma ou várias functions.
+
+- O `takeLatest` diferente do `takeEvery`, no caso de o usário solicitar várias vezes a mesma função enquanto ainda estiver executnado alguma a anterior é descartada e só será considerada a última.
+
+- Já o `takeEvery` é executado toda vez.
+
+- Por fim vamos exportar o seguinte da function:
+
+```js
+export default all([takeLatest('@cart/ADD_REQUEST', addToCart)]);
+```
+
+- Os parametros do `takeLatest` o primeiro é a aciton que queremos ouvir, o segundo o que queremos executar.
 
 ---
-<h2>Resumindo...</h2>
 
-- para calcular o total utilizando `redux` por questão de desempenho, utilizamos o `mapStateToProps`
+<h2>Configurando o sagar na nossa aplicação</h2>
 
-
----
-
-<h2>Exibindo quantidades na Home</h2>
-
-- Na página `Home` vamos adicionar o `mapStateToProps`:
+- Criar o arquivo `src/store/modules/rootSaga.js` que tem a mesma funcionalidade do `rootReducer` que é juntar todos os reducers em um único arquivo:
 
 ```js
-const mapStateToProps = state => ({
-  amount: state.cart.reduce((amount, product) => {
-    amount[product.id] = product.amount;
-    return amount;
-  }, {})
-});
+import { all } from 'redux-saga/effects';
+
+import cart from './cart/sagas';
+
+// Exportamos um generator utilizando o function*
+export default function* rootSaga() {
+  // Podemos adicionar mais caso for necessario: all([cart, outro, ...])
+  return yield all([cart]);
+}
 ```
 
-- Passamos o objeto
+- Precisamos também alterar o arquivo `src/store/index.js`:
 
-- A primeira variavel nesse caso `amount` o qual é inicializada com `{}`
-
-- E a variavel de controle que pertence ao objeto `state.cart` que chamamos de `product`;
-
-- e geramos um array, com as quantidades.
-
-- Exemplo de reduce [Javascript reduce on array of objects](https://stackoverflow.com/questions/5732043/javascript-reduce-on-array-of-objects)
-
-
+- Importamos o metodo `createSagaMiddleware` de dentro `redux-saga`:
 
 ```js
-var arr = [{x:1}, {x:2}, {x:4}];
-arr.reduce(function (acc, obj) { return acc + obj.x; }, 0); // 7
-console.log(arr);
+import createSagaMiddleware from 'redux-saga';
 ```
 
-- Como a page `Home` é uma class utilizamos o `this.props.amount` para obter o objeto gerado no `mapStateToProps`
+- do `redux` importamos o `applyMiddleware` e `compose`
 
-- E na quantidade colocamos:
+- servem para criar e aplicar alguns middlewares no nosso store e também juntar algumas functions que faremos utilizando o `compose`
+
+- Importar também o nosso arquivo `src/store/modules/rootSaga.js`:
 
 ```js
- {amount[product.id] || 0}
+import rootSaga from './modules/rootSaga';
 ```
 
-- O zero é no caso de ser `undefined` ou `vazio`
+- Agora criamos uma const:
+
+```js
+const sagaMiddleware = createSagaMiddleware();
+```
+
+- No ambiente de desenvolvimento como já tenho o `console.tron.createEnhancer()`, precisamos unir o sagaMiddleware, e para não dar conflito utilizamos o compose:
+
+```js
+const enhancer =
+  process.env.NODE_ENV === 'development' ? compose(console.tron.createEnhancer(), applyMiddleware(sagaMiddleware)) : null;
+```
+
+- E no ambiente de produção como não temos nenhuma function então não precisamos do compose apenas do applyMiddleware:
+
+```js
+const enhancer =
+  process.env.NODE_ENV === 'development' ? compose(console.tron.createEnhancer(), applyMiddleware(sagaMiddleware)) : applyMiddleware(sagaMiddleware);
+```
+
+- E para finalizar antes do `export` inserimos a linha quer irá executar o middleware:
+
+```js
+sagaMiddleware.run(rootSaga);
+```
