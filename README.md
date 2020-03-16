@@ -1,235 +1,75 @@
-<h1>React com redux parte 12 - Verificar estoque no carrinho</h1>
+<h1>React com redux parte 13 - Route com Redux</h1>
 
-- No arquivo `src/store/modules/cart/reducer.js` ajustar a listener da action `@cart/ADD_SUCCESS` :
-
-```js
-case '@cart/ADD_SUCCESS':
-  return produce(state, draft => {
-    const { product } = action;
-
-    draft.push(product);
-  });
-
-```
-
-- No arquivo `src/store/modules/cart/saga.js` ajustar a function `addToCart` :
+- Queremos direcionar o usuário para carrinho quando ele adiciona um item pela home,
+poderiamos realizar da sequinte forma porém incorreta:
 
 ```js
-import { formatPrice } from '../../../util/format';
+handleAddProduct = id => {
+    const { addToCartRequest } = this.props;
 
-function* addToCart({ id }) {
-  const response = yield call(api.get, `/products/${id}`);
+    addToCartRequest(id);
 
-  const data = {
-    ...response.data,
-    amount: 1,
-    priceFormated: formatPrice(response.data.price)
-  }
-
-  yield put(addToCartSuccess(data));
-}
+    this.props.history.push('/cart');
+  };
 ```
 
-- Para verificar se o produto já não foi adicionado ao carrinho precisamos importar uma function `select`
-do `redux-saga/effects`, para acessar o estado da aplicação:
+- Porém como dentro do `addToCartRequest(id)` o js está executando uma chamada a uma api, pode ser que ela demore
+e a navegação execute antes de ela terminar, e não adianta colocar um `await` na frente que não irá funcionar nesse caso.
 
-```js
-import { call, select, put, all, takeLatest } from 'redux-saga/effects';
-```
+- Dessa forma precisamos redirecionar para o carrinho lá dentro do saga.
 
-- Importar também a action:
-
-```js
-import { addToCartSuccess, updateAmount } from './actions';
-```
-
-- E no inicio da function `addToCart` realizamos a verificação, lembrando sempre que utiliza um effect no saga é necessário o `yield` na frente:
-
-```js
-const productExists = yield select(state => state.cart.find(p => p.id === id))
-
-
-if (productExists) {
-  const amount = productExists.amount + 1;
-// Alterar o amount disparar uma action
-  yield put(updateAmount(id, amount));
-} else {
-  const response = yield call(api.get, `/products/${id}`);
-
-  const data = {
-    ...response.data,
-    amount: 1,
-    priceFormated: formatPrice(response.data.price)
-  }
-
-  yield put(addToCartSuccess(data));
-}
-
-```
----
-
-<h2>Verificar o estoque</h2>
-
-- No arquivo `src/store/modules/cart/sagas.js` alterar o inicio da function `addToCart`:
-
-```js
-function* addToCart({ id }) {
-  const productExists = yield select(state =>
-    state.cart.find(p => p.id === id)
-  );
-
-  const stock = yield call(api.get, `/stock/${id}`);
-  const stockAmount = stock.data.amount;
-  const currentAmount = productExists ? productExists.amount : 0;
-
-  const amount = currentAmount + 1;
-
-  if (amount > stockAmount) {
-    console.tron.warn('ERROR stock');
-
-    return;
-  }
-  //...
-}
-```
-
----
-
-<h2>Exibindo msg para o usuário quando não tem estoque</h2>
-
-- Instalar a lib `react-toastify`:
+- Inicialmente vamos adicionar a lib `history`:
 
 ```bash
-yarn add react-toastify
+yarn add history
 ```
 
-- No `App.js` importar:
+- Ela serve para controla a parte de history da aplicação.
+
+- Criamos o arquivo `src/services/history.js` adicionamos o seguinte dentro dele:
 
 ```js
-import { ToastContainer } from 'react-toastify';
+import { createBrowserHistory } from 'history';
+
+const history = createBrowserHistory();
+
+export default history;
 ```
 
-- E adicionar aos demais elementos:
+- No arquivo `App.js` adicionar o import do history:
 
 ```js
-<Provider store={store}>
-  <BrowserRouter>
-    <Header />
-    <Routes />
-
-    <ToastContainer autoClose={3000} />
-
-    <GlobalStyle />
-  </BrowserRouter>
-</Provider>
+import history from './services/history';
 ```
 
-- No arquivo de style `src/style/global.js` adicionar os estilos do toastify:
+- Ao invés de importar `BrowserRouter` importamos `Router`
+
+- Alteramos também a tag `<BrowserRouter>` por `<Router>`
+
+- E nessa tag `<Router>` adicionamos o seguinte:
 
 ```js
-import 'react-toastify/dist/ReactToastify.css';
+<Router history={history}>
 ```
 
-- No `src/store/modules/cart/saga.js` importar o `toast`
+- Agora no arquivo `src/store/modules/cart/sagas.js` importamos o `services/history`:
 
 ```js
-import { toast } from 'react-toastify';
+import history from '../../../services/history';
 ```
 
-e logo após o if `if (amount > stockAmount) {` adicionar o seguinte:
-
+- E na parte de adição dentro do else adicionamos:
 
 ```js
-toast.error('Quantidade solicitada fora de estoque');
+history.push('/cart');
 ```
 
+- Agora o redirecionamento realmente é executado após a chamada da api.
 
----
+- Para testar que isso realmente está funcionando podemos executar o seguinte comando do json-server:
 
-<h2>Verificar Estoque no carrinho</h2>
-
-- Ajustar a actions em `src/store/modules/cart/actions.js` substituir a function `updateAmount`:
-
-```js
-export function updateAmountRequest(id, amount) {
-  return { type: '@cart/UPDATE_AMOUNT_REQUEST', id, amount };
-}
-
-export function updateAmountSuccess(id, amount) {
-  return { type: '@cart/UPDATE_AMOUNT_SUCCESS', id, amount };
-}
+```bash
+json-server server.json -p 3333 -d 2000
 ```
 
-- Na página `cart` alterar `updateAmount` por `updateAmountRequest`
-
-- No arquivo `src/store/modules/cart/sagas.js` alterar `updateAmount` por `updateAmountSuccess`
-
-- Alterar também `export default all([takeLatest('@cart/ADD_REQUEST', addToCart)]);` por:
-
-```js
-export default all([
-  takeLatest('@cart/ADD_REQUEST', addToCart),
-  takeLatest('@cart/UPDATE_AMOUNT_REQUEST', updateAmount),
-
-  ]);
-```
-
-- Dessa forma ela irá ouvir também a action `@cart/UPDATE_AMOUNT_REQUEST`
-
-- Criar a function ainda dentro do `saga.js`:
-
-```js
-function* updateAmount({ id, amount }){
-  // Não permitir diminuir a quantidade para menos ou igual que zero
-  if (amount <= 0) {
-    return;
-  }
-
-  // Realizar chamada a api:
-
-  const stock = yield call(api.get,`stock/${id}`);
-  const stockAmount = stock.data.amount;
-
-  if (amount > sockAmount) {
-    console.tron.warn('ERROR stock');
-    toast.error('Quantidade solicitada fora de estoque');
-    return;
-  }
-
-  yield put(updateAmountSuccess(id, amount));
-}
-```
-
-- No `src/store/modules/cart/reducer.js` alterar onde está o seguinte:
-
-```js
-case '@cart/UPDATE_AMOUNT':
-  if (action.amount <= 0) {
-    return state;
-  }
-  return produce(state, draft => {
-    const productIndex = draft.findIndex(p => p.id === action.id);
-
-    if (productIndex >= 0) {
-      draft[productIndex].amount = Number(action.amount);
-    }
-  });
-```
-
-- Para o seguinte:
-
-```js
-case '@cart/UPDATE_AMOUNT_SUCCESS':
-  return produce(state, draft => {
-    const productIndex = draft.findIndex(p => p.id === action.id);
-
-    if (productIndex >= 0) {
-      draft[productIndex].amount = Number(action.amount);
-    }
-  });
-```
-
-
----
-
-Sempre que precisar chamar api, ou um request assim por diante para realzar alguma verificação dentro do redux, utilizamos o saga.
+- Dessa forma ele terá um delay de 2 segundos para realizar a chamada da api, e o history realmente só será chamado após a chamada da api.
